@@ -1,59 +1,67 @@
 import socket
-from Crypto.PublicKey import ElGamal
 from Crypto.Util import number
 from typing import Tuple
+import gensafeprime
 
-KEY_FILE_PRIVATE = 'elgamal_private.pem'
-KEY_FILE_PUBLIC = 'elgamal_public.pem'
+class Parameters:
+    def __init__(self, n_bits: int) -> None:
+        p = gensafeprime.generate(n_bits)
+        q = (p - 1) // 2
+        g = number.getRandomNBitInteger(n_bits) % p
+        while (pow(g, 2, p) == 1 or pow(g, q, p) != 1):
+            g = number.getRandomNBitInteger(n_bits) % p
+        self.p: int = p
+        self.q: int = q
+        self.g: int = g
 
-def load_key(file_path):
-    with open(file_path, 'rb') as f:
-        lines = f.read().split(b'\n')
-    key_components = {}
-    for line in lines:
-        if b": " in line:
-            k, v = line.split(b": ")
-            key_components[k.strip()] = int.from_bytes(v, 'big')
-    return key_components
+class DiffieHellmanFp:
+    def __init__(self, parameters: Parameters) -> None:
+        self.parameters = parameters
+        self.x, self.y = self.__gen_keypair()
 
-def elgamal_encrypt(public_key_components, message):
-    p = public_key_components[b'p']
-    g = public_key_components[b'g']
-    y = public_key_components[b'y']
-    elgamal_key = ElGamal.construct((p, g, y))
-    k = number.getRandomRange(2, elgamal_key.p - 1)
-    a, b = elgamal_key._encrypt(message, k)
-    return (a, b)
+    def __gen_keypair(self) -> Tuple[int, int]:
+        x = number.getRandomRange(2, self.parameters.q - 1)
+        y = pow(self.parameters.g, x, self.parameters.p)
+        return x, y
 
-def elgamal_decrypt(private_key_components, ciphertext):
-    p = private_key_components[b'p']
-    g = private_key_components[b'g']
-    y = private_key_components[b'y']
-    x = private_key_components[b'x']
-    elgamal_key = ElGamal.construct((p, g, y, x))
-    plaintext = elgamal_key._decrypt(ciphertext)
-    return plaintext
+def elgamal_encrypt(elgamal_key, message):
+    k = number.getRandomRange(2, elgamal_key.parameters.q - 1)
+    a = pow(elgamal_key.parameters.g, k, elgamal_key.parameters.p)
+    b = (pow(elgamal_key.y, k, elgamal_key.parameters.p) * int.from_bytes(message, 'big')) % elgamal_key.parameters.p
+    return a, b
+
+def elgamal_decrypt(elgamal_key, ciphertext):
+    a, b = ciphertext
+    s = pow(a, elgamal_key.x, elgamal_key.parameters.p)
+    m = (b * pow(s, elgamal_key.parameters.p - 2, elgamal_key.parameters.p)) % elgamal_key.parameters.p
+    return m.to_bytes((m.bit_length() + 7) // 8, 'big')
 
 def client_program():
-    client_private_key = load_key(KEY_FILE_PRIVATE)
-    client_public_key = load_key(KEY_FILE_PUBLIC)
+    # Generar claves ElGamal para el cliente
+    parameters = Parameters(2048)
+    client_key = DiffieHellmanFp(parameters)
 
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    client_socket.connect(('192.168.1.250', 65432))
+    client_socket.connect(('100.115.92.206', 65432))
 
     try:
         # Recibir la clave pública del servidor
         server_public_key_data = client_socket.recv(2048)
-        server_public_key_lines = server_public_key_data.split(b'\n')
-        server_public_key = {}
+        server_public_key_lines = server_public_key_data.decode().split('\n')
+        server_public_key_components = {}
         for line in server_public_key_lines:
-            if b": " in line:
-                k, v = line.split(b": ")
-                server_public_key[k.strip()] = int.from_bytes(v, 'big')
+            if ": " in line:
+                k, v = line.split(": ")
+                server_public_key_components[k.strip()] = int(v)
+
+        server_public_key = Parameters(2048)
+        server_public_key.p = server_public_key_components['p']
+        server_public_key.g = server_public_key_components['g']
+        server_public_key.y = server_public_key_components['y']
 
         # Enviar la clave pública del cliente al servidor
-        with open(KEY_FILE_PUBLIC, 'rb') as f:
-            client_socket.sendall(f.read())
+        client_public_key_data = f"p: {client_key.parameters.p}\ng: {client_key.parameters.g}\ny: {client_key.y}\n"
+        client_socket.sendall(client_public_key_data.encode())
 
         while True:
             # Pedir al usuario que introduzca un mensaje
@@ -69,13 +77,14 @@ def client_program():
 
             # Recibir la respuesta cifrada del servidor
             encrypted_response_data = client_socket.recv(4096)
+            a_len = len(encrypted_response_data) // 2
             encrypted_response = (
-                int.from_bytes(encrypted_response_data[:len(encrypted_response_data)//2], 'big'),
-                int.from_bytes(encrypted_response_data[len(encrypted_response_data)//2:], 'big')
+                int.from_bytes(encrypted_response_data[:a_len], 'big'),
+                int.from_bytes(encrypted_response_data[a_len:], 'big')
             )
 
             # Desencriptar la respuesta con la clave privada del cliente
-            decrypted_response = elgamal_decrypt(client_private_key, encrypted_response)
+            decrypted_response = elgamal_decrypt(client_key, encrypted_response)
             print(f"Servidor: {decrypted_response.decode()}")
 
     except Exception as e:
