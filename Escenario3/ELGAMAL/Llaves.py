@@ -36,7 +36,7 @@ dh = DiffieHellmanFp(parameters)
 
 
 # Save private key (including all components)
-with open("elgamal_private.pem", "wb") as f:
+with open("elgamal_private2.pem", "wb") as f:
         f.write(b"Private key components:\n")
         f.write(b"p: " + number.long_to_bytes(dh.parameters.p) + b"\n")
         f.write(b"g: " + number.long_to_bytes(dh.parameters.g) + b"\n")
@@ -44,7 +44,7 @@ with open("elgamal_private.pem", "wb") as f:
         f.write(b"x (private): " + number.long_to_bytes(dh.x) + b"\n")
     
     # Save public key (only public components)
-with open("elgamal_public.pem", "wb") as f:
+with open("elgamal_public2.pem", "wb") as f:
         f.write(b"p: " + number.long_to_bytes(dh.parameters.p) + b"\n")
         f.write(b"g: " + number.long_to_bytes(dh.parameters.g) + b"\n")
         f.write(b"y (public): " + number.long_to_bytes(dh.y) + b"\n")
